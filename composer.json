@@ -17,7 +17,7 @@
         "behat/behat": "~3.0",
         "firebase/php-jwt": "1.0.0",
         "guzzlehttp/guzzle": "4.*",
-        "phpunit/phpunit": "~4.0"
+        "phpunit/phpunit": "~5.0"
     },
 
     "require-dev": {
