@@ -1,5 +1,5 @@
 {
-    "name": "cnam/jwt-api-extension",
+    "name": "ceednee/jwt-api-extension",
     "type": "behat-extension",
     "description": "Behat extension for testing api secure with jwt token base in Behat WebApiExtension",
     "keywords": ["api", "test","jwt"],
