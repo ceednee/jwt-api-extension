@@ -15,7 +15,7 @@
     "require": {
         "php": ">=5.4",
         "behat/behat": "~3.0",
-        "firebase/php-jwt": "3.0.0",
+        "firebase/php-jwt": "dev-master",
         "guzzlehttp/guzzle": "4.*",
         "phpunit/phpunit": "~5.0"
     },
