@@ -7,66 +7,114 @@ use Behat\Gherkin\Node\TableNode;
 use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\RequestException;
 use PHPUnit_Framework_Assert as Assertions;
+use Namshi\JOSE\JWS;
 
 class JwtApiContext implements ApiClientAwareInterface
 {
+    const ALGORYTHM = 'RS256';
 
-    /**
-     * @var string
-     */
+    /** @var string */
     protected $authorization;
 
-    /**
-     * @var ClientInterface
-     */
+    /** @var ClientInterface */
     protected $client;
 
-    /**
-     * @var array
-     */
+    /** @var array */
     protected $headers = array();
 
-    /**
-     * @var \GuzzleHttp\Message\RequestInterface
-     */
+    /**  @var \GuzzleHttp\Message\RequestInterface */
     protected $request;
 
-    /**
-     * @var \GuzzleHttp\Message\ResponseInterface
-     */
+    /** @var \GuzzleHttp\Message\ResponseInterface */
     protected $response;
 
     protected $placeHolders = array();
-    
-    /**
-     * @var array
-     */
+
+    /** @var array */
     protected $config;
 
+    /** @var string */
+    protected $privateKey;
+
+    /** @var string */
+    protected $publicKey;
+
+    /** @var string */
+    protected $passPhrase;
+
+    /** @var string */
+    protected $token;
+
+    /**
+     * @param array $config
+     */
     public function setConfig(array $config)
     {
         $this->config = $config;
     }
 
     /**
+     * @param array $data
+     *
+     * @return string
+     */
+    public function encode(array $data)
+    {
+        $jws = new JWS(self::ALGORYTHM);
+        $jws->setPayload($data);
+        $jws->sign($this->getPrivateKey());
+
+
+        return $jws->getTokenString();
+    }
+
+    /**
+     * @param $token
+     *
+     * @return array|bool
+     */
+    public function decode($token)
+    {
+        try {
+            $jws = JWS::load($token);
+        } catch (\InvalidArgumentException $e) {
+            return false;
+        }
+
+        if (!$jws->isValid($this->getPublicKey(), self::ALGORYTHM)) {
+            return false;
+        }
+
+        return $jws->getPayload();
+    }
+
+    /**
+     * @return bool|resource
+     */
+    protected function getPrivateKey()
+    {
+        return openssl_pkey_get_private('file://' . $this->config['jwt_private_key_path'], $this->config['jwt_pass_phrase']);
+    }
+
+    /**
+     * @return resource
+     */
+    protected function getPublicKey()
+    {
+        return openssl_pkey_get_public('file://' . $this->config['jwt_public_key_path']);
+    }
+
+    /**
      * Adds JWT Authentication header in the request.
      *
-     * @param string $username
-     *
-     * @Then /^I am authenticating with jwt token as "([^"]*)"$/
+     * @Then /^I am authenticating with jwt token$/
      */
-    public function iAmAuthenticatingWithJWT($username)
+    public function iAmAuthenticatingWithJWT()
     {
         $this->removeHeader('Authorization');
 
-        $key = \JWT::encode(
-            [
-                $this->config['encoded_field_name'] => $username,
-                'exp' => time()+$this->config['ttl']
-            ]
-        , $this->config['secret_key']);
-
-        $this->addHeader($this->config['header_name'], $this->config['token_prefix'].$key);
+        $this->authorization = $this->config['token_prefix'].$this->token;
+        $this->addHeader('Authorization', $this->config['header_name'].' '.$this->authorization);
     }
 
     /**
@@ -83,13 +131,6 @@ class JwtApiContext implements ApiClientAwareInterface
         Assertions::assertArrayHasKey($token_field_name, $response);
         $tks = explode('.', $response[$token_field_name]);
         Assertions::assertEquals(3 , count($tks));
-
-        list($headb64, $bodyb64, $cryptob64) = $tks;
-
-        $sig = \JWT::urlsafeB64Decode($cryptob64);
-        $header = \JWT::jsonDecode(\JWT::urlsafeB64Decode($headb64));
-
-        Assertions::assertTrue(\JWT::verify("$headb64.$bodyb64", $sig, $this->config['secret_key'], $header->alg));
     }
 
     /**
@@ -107,7 +148,7 @@ class JwtApiContext implements ApiClientAwareInterface
         $response = $this->response->json();
         Assertions::assertArrayHasKey($token_field_name, $response);
 
-        $actual = \JWT::decode($response[$token_field_name], $this->config['secret_key']);
+        $actual = JWT::decode($response[$token_field_name], $this->config['secret_key']);
 
         foreach ($expected as $key => $needle) {
             Assertions::assertObjectHasAttribute($key, $actual);
@@ -121,21 +162,6 @@ class JwtApiContext implements ApiClientAwareInterface
     public function setClient(ClientInterface $client)
     {
         $this->client = $client;
-    }
-
-    /**
-     * Adds Basic Authentication header to next request.
-     *
-     * @param string $username
-     * @param string $password
-     *
-     * @Given /^I am authenticating as "([^"]*)" with "([^"]*)" password$/
-     */
-    public function iAmAuthenticatingAs($username, $password)
-    {
-        $this->removeHeader('Authorization');
-        $this->authorization = base64_encode($username . ':' . $password);
-        $this->addHeader('Authorization', 'Basic ' . $this->authorization);
     }
 
     /**
@@ -157,12 +183,13 @@ class JwtApiContext implements ApiClientAwareInterface
      * @param string $method request method
      * @param string $url    relative url
      *
-     * @When /^(?:I )?send a ([A-Z]+) request to "([^"]+)"$/
+     * @When /^(?:I )?send an API ([A-Z]+) request to "([^"]+)"$/
      */
-    public function iSendARequest($method, $url)
+    public function iSendAnApiRequest($method, $url)
     {
         $url = $this->prepareUrl($url);
         $this->request = $this->getClient()->createRequest($method, $url);
+
         if (!empty($this->headers)) {
             $this->request->addHeaders($this->headers);
         }
@@ -177,9 +204,9 @@ class JwtApiContext implements ApiClientAwareInterface
      * @param string    $url    relative url
      * @param TableNode $post   table of post values
      *
-     * @When /^(?:I )?send a ([A-Z]+) request to "([^"]+)" with values:$/
+     * @When /^(?:I )?send an API ([A-Z]+) request to "([^"]+)" with values:$/
      */
-    public function iSendARequestWithValues($method, $url, TableNode $post)
+    public function iSendAnApiRequestWithValues($method, $url, TableNode $post)
     {
         $url = $this->prepareUrl($url);
         $fields = array();
@@ -206,9 +233,9 @@ class JwtApiContext implements ApiClientAwareInterface
      * @param string       $url    relative url
      * @param PyStringNode $string request body
      *
-     * @When /^(?:I )?send a ([A-Z]+) request to "([^"]+)" with body:$/
+     * @When /^(?:I )?send an API ([A-Z]+) request to "([^"]+)" with body:$/
      */
-    public function iSendARequestWithBody($method, $url, PyStringNode $string)
+    public function iSendAnApiRequestWithBody($method, $url, PyStringNode $string)
     {
         $url = $this->prepareUrl($url);
         $string = $this->replacePlaceHolder(trim($string));
@@ -231,9 +258,9 @@ class JwtApiContext implements ApiClientAwareInterface
      * @param string       $url    relative url
      * @param PyStringNode $body   request body
      *
-     * @When /^(?:I )?send a ([A-Z]+) request to "([^"]+)" with form data:$/
+     * @When /^(?:I )?send an API ([A-Z]+) request to "([^"]+)" with form data:$/
      */
-    public function iSendARequestWithFormData($method, $url, PyStringNode $body)
+    public function iSendAnApiRequestWithFormData($method, $url, PyStringNode $body)
     {
         $url = $this->prepareUrl($url);
         $body = $this->replacePlaceHolder(trim($body));
@@ -242,12 +269,20 @@ class JwtApiContext implements ApiClientAwareInterface
         parse_str(implode('&', explode("\n", $body)), $fields);
         $this->request = $this->getClient()->createRequest($method, $url);
         /** @var \GuzzleHttp\Post\PostBodyInterface $requestBody */
+
         $requestBody = $this->request->getBody();
+
         foreach ($fields as $key => $value) {
             $requestBody->setField($key, $value);
         }
 
         $this->sendRequest();
+
+        $json = $this->response->json();
+
+        if (isset($json['token'])) {
+            $this->token = $json['token'];
+        }
     }
 
     /**
@@ -439,9 +474,18 @@ class JwtApiContext implements ApiClientAwareInterface
     protected function getClient()
     {
         if (null === $this->client) {
-            throw new \RuntimeException('Client has not been set in WebApiContext');
+            throw new \Exception('No token found');
         }
 
         return $this->client;
+    }
+
+    protected function getToken()
+    {
+        if (null === $this->token) {
+            throw new \RuntimeException('Client has not been set in WebApiContext');
+        }
+
+        return $this->token;
     }
 }

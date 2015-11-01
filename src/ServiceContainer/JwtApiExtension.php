@@ -68,7 +68,16 @@ class JwtApiExtension implements ExtensionInterface
                 ->scalarNode('encoded_field_name')
                     ->defaultValue('username')
                 ->end()
-            ->end()
+                ->scalarNode('jwt_private_key_path')
+                    ->defaultValue('')
+                ->end()
+                ->scalarNode('jwt_public_key_path')
+                    ->defaultValue('')
+                ->end()
+                ->scalarNode('jwt_pass_phrase')
+                    ->defaultValue('')
+                ->end()
+             ->end()
         ->end();
     }
 
